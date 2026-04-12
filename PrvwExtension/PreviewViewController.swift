@@ -24,6 +24,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     // Archive / folder views
     private var outlineView: NSOutlineView!
     private var scrollView: NSScrollView!
+    private var footerLabel: NSTextField!
     
     // Markdown views
     private var markdownScrollView: NSScrollView!
@@ -111,13 +112,29 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         
+        // Footer label
+        footerLabel = NSTextField(labelWithString: "")
+        footerLabel.isEditable = false
+        footerLabel.isBordered = false
+        footerLabel.drawsBackground = false
+        footerLabel.alignment = .center
+        footerLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        footerLabel.textColor = .secondaryLabelColor
+        footerLabel.translatesAutoresizingMaskIntoConstraints = false
+        
         view.addSubview(scrollView)
+        view.addSubview(footerLabel)
         
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            
+            footerLabel.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 4),
+            footerLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            footerLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            footerLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -6),
+            footerLabel.heightAnchor.constraint(equalToConstant: 16)
         ])
     }
     
@@ -212,6 +229,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             progressIndicator.startAnimation(nil)
             scrollView.isHidden = true
             markdownScrollView.isHidden = true
+            footerLabel.isHidden = true
             errorLabel?.isHidden = true
         }
         
@@ -230,6 +248,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                     // Scroll to top
                     self.markdownTextView.scrollToBeginningOfDocument(nil)
                     self.markdownScrollView.isHidden = false
+                    self.footerLabel.isHidden = true
                 }
             } else {
                 let items: [PreviewItem]
@@ -266,11 +285,13 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                     self.rootItems = items
                     self.scrollView.isHidden = false
                     self.outlineView.reloadData()
+                    self.updateFooter(with: items)
                 }
             }
         } catch {
             await MainActor.run {
                 self.progressIndicator.stopAnimation(nil)
+                self.footerLabel.isHidden = true
                 self.showError("Unable to preview this file: \(error.localizedDescription)")
             }
         }
@@ -322,6 +343,44 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
         
         return .folder
+    }
+    
+    // MARK: - Statistics
+    
+    private struct Statistics {
+        var fileCount = 0
+        var folderCount = 0
+        var totalSize: Int64 = 0
+        
+        var summary: String {
+            let files = fileCount == 1 ? "1 file" : "\(fileCount) files"
+            let folders = folderCount == 1 ? "1 folder" : "\(folderCount) folders"
+            return "\(files), \(folders)"
+        }
+    }
+    
+    private func updateFooter(with items: [PreviewItem]) {
+        var stats = Statistics()
+        
+        func calculate(_ items: [PreviewItem]) {
+            for item in items {
+                if item.isDirectory {
+                    stats.folderCount += 1
+                    if let children = item.children {
+                        calculate(children)
+                    }
+                } else {
+                    stats.fileCount += 1
+                    stats.totalSize += item.fileSize ?? 0
+                }
+            }
+        }
+        
+        calculate(items)
+        
+        let sizeString = formatFileSize(stats.totalSize)
+        footerLabel.stringValue = "\(stats.summary) • \(sizeString)"
+        footerLabel.isHidden = false
     }
     
     private func formatFileSize(_ bytes: Int64) -> String {
